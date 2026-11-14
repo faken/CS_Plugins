@@ -1,0 +1,57 @@
+#!/bin/bash
+export PATH=/usr/tesla/UI/bin:/usr/bin:/bin:/usr/sbin:/sbin
+export LD_LIBRARY_PATH=/usr/tesla/UI/lib:/usr/lib:/usr/lib64:/lib:/lib64
+export HOME=/tmp/welcome-home
+mkdir -p "$HOME" /tmp /run /dev/shm /tmp/dvaccess
+mount -t tmpfs tmpfs /dev/shm
+# All files and policies below belong to this isolated RAM-only test guest.
+touch /tmp/console-sink
+mount --bind /tmp/console-sink /dev/console
+cat > /tmp/welcome-dbus.conf <<'BUS_END'
+<busconfig>
+  <type>system</type>
+  <listen>unix:path=/tmp/welcome-dbus.sock</listen>
+  <policy context="default">
+    <allow user="*"/>
+    <allow own="*"/>
+    <allow send_destination="*"/>
+    <allow receive_sender="*"/>
+  </policy>
+</busconfig>
+BUS_END
+export DBUS_SYSTEM_BUS_ADDRESS=unix:path=/tmp/welcome-dbus.sock
+export DBUS_SESSION_BUS_ADDRESS=$DBUS_SYSTEM_BUS_ADDRESS
+dbus-daemon --config-file=/tmp/welcome-dbus.conf --fork
+QtCarServer >/tmp/native-carserver.log 2>&1 &
+carserver=$!
+for n in 1 2 3 4 5 6 7 8 9 10; do
+    dbus-send --system --print-reply --dest=org.freedesktop.DBus / org.freedesktop.DBus.ListNames > /tmp/names
+    grep -q 'com.tesla.Debug' /tmp/names && break
+    sleep 1
+done
+echo WELCOME_FIRMWARE_BUS_NAMES_BEGIN
+cat /tmp/names
+echo WELCOME_FIRMWARE_BUS_NAMES_END
+for name in VAPI_isLocked VAPI_driverPresent VAPI_lockRequestType GUI_approachLightingRequest GUI_halloweenLightSwitchRequest; do
+    echo "WELCOME_FIRMWARE_READ $name"
+    dbus-send --system --print-reply --reply-timeout=3000 --dest=com.tesla.Debug /Debug com.tesla.Debug.get_data_value string:"$name" 2>&1
+done
+echo WELCOME_FIRMWARE_WRITE_BEGIN
+dbus-send --system --print-reply --reply-timeout=3000 --dest=com.tesla.Debug /Debug com.tesla.Debug.set_data_value string:GUI_halloweenLightSwitchRequest string:ParkingLights string: string: 2>&1
+dbus-send --system --print-reply --reply-timeout=3000 --dest=com.tesla.Debug /Debug com.tesla.Debug.get_data_value string:GUI_halloweenLightSwitchRequest 2>&1
+echo WELCOME_FIRMWARE_WRITE_END
+echo WELCOME_FIRMWARE_RESTORE_BEGIN
+dbus-send --system --print-reply --reply-timeout=3000 --dest=com.tesla.Debug /Debug com.tesla.Debug.set_data_value string:GUI_halloweenLightSwitchRequest 'string:<invalid>' string: string: 2>&1
+dbus-send --system --print-reply --reply-timeout=3000 --dest=com.tesla.Debug /Debug com.tesla.Debug.get_data_value string:GUI_halloweenLightSwitchRequest 2>&1
+echo WELCOME_FIRMWARE_RESTORE_END
+echo WELCOME_FIRMWARE_UNKNOWN_BEGIN
+dbus-send --system --print-reply --reply-timeout=3000 --dest=com.tesla.Debug /Debug com.tesla.Debug.get_data_value string:AppeneticNonexistentProbeValue 2>&1
+echo WELCOME_FIRMWARE_UNKNOWN_END
+echo WELCOME_FIRMWARE_LOG_BEGIN
+grep -E 'ERROR|FATAL|assert|Failed to register|registered dbus' /tmp/native-carserver.log | head -15
+echo WELCOME_FIRMWARE_LOG_END
+kill -KILL "$carserver" 2>/dev/null || :
+echo WELCOME_FIRMWARE_DONE
+sync
+echo o > /proc/sysrq-trigger
+while :; do sleep 1; done

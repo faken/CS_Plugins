@@ -1,0 +1,108 @@
+#!/bin/bash
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+mkdir -p /tmp /run /tmp/pkg/hooks /tmp/pkg/lib /tmp/settings
+@@PACKAGE@@
+export CSDK_PACKAGE_DIR=/tmp/pkg CSDK_SETTINGS=/tmp/settings
+export CSDK_FIRMWARE=2026.38.5.12 CSDK_API_SOCKET=/tmp/service-api.sock CSDK_TOKEN=nonsecret-test-token
+cat > /tmp/service-response.sh <<'RESPONSE_END'
+#!/bin/bash
+IFS= read -r request
+length=0; auth=missing
+while IFS= read -r line; do
+    line=${line%$'\r'}
+    case "$line" in
+        'Content-Length: '*) length=${line#*: } ;;
+        'Authorization: '*) auth=${line#*: } ;;
+    esac
+    [ -z "$line" ] && break
+done
+body=
+if [ "$length" -gt 0 ]; then body=$(dd bs=1 count="$length" 2>/dev/null); fi
+read -r method path protocol <<< "$request"
+printf '%s|%s|%s\n' "$method $path" "$auth" "$body" >> /tmp/requests
+code='200 OK'; response=
+case "$method $path" in
+    'GET /v1/vehicle/gear') response=$(cat /tmp/gear) ;;
+    'GET /v1/dv/VAPI_isLocked') response=$(cat /tmp/locked) ;;
+    'GET /v1/dv/VAPI_driverPresent') response=$(cat /tmp/present) ;;
+    'PUT /v1/dv/GUI_halloweenLightSwitchRequest')
+        [ "$body" = '{"value":"ParkingLights","hold":false}' ] || code='400 Bad Request'
+        response='{"effective":true}' ;;
+    'DELETE /v1/dv/GUI_halloweenLightSwitchRequest') ;;
+    'PUT /v1/status') ;;
+    *) code='503 Service Unavailable' ;;
+esac
+printf 'HTTP/1.1 %s\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "$code" "${#response}" "$response"
+RESPONSE_END
+chmod +x /tmp/service-response.sh
+socat UNIX-LISTEN:/tmp/service-api.sock,fork EXEC:/tmp/service-response.sh >/tmp/socat-service.log 2>&1 &
+server=$!
+sleep 1
+fail() { echo "WELCOME_SERVICE_FAIL $*"; cat /tmp/service.log /tmp/socat-service.log 2>/dev/null; }
+count() { grep -c "$1" /tmp/requests 2>/dev/null || :; }
+await_count() {
+    local pattern=$1 minimum=$2 i=0 n
+    while [ "$i" -lt 15 ]; do
+        n=$(count "$pattern"); n=${n:-0}
+        [ "$n" -ge "$minimum" ] && return 0
+        sleep 1; i=$((i+1))
+    done
+    fail "Timed out waiting for $pattern ($minimum)"; return 1
+}
+start_service() {
+    : > /tmp/requests
+    printf 'P\n' > /tmp/gear; printf 'true\n' > /tmp/locked
+    printf 'false\n' > /tmp/present
+    printf 'true\n' > /tmp/settings/enabled; printf '5\n' > /tmp/settings/duration
+    /bin/bash /tmp/pkg/hooks/service.sh >/tmp/service.log 2>&1 &
+    service=$!
+    await_count 'GET /v1/dv/VAPI_driverPresent' 2
+}
+stop_service() {
+    kill -TERM "$service" 2>/dev/null || :
+    wait "$service"; local result=$?
+    [ "$result" = 0 ] || { fail "Service exit was $result"; return 1; }
+}
+# The real production shell, curl transport, settings reader, loop, traps,
+# monotonic clock and hooks run unchanged; only the SDK server is a test double.
+if start_service; then
+    printf 'false\n' > /tmp/locked
+    if await_count 'PUT /v1/dv/GUI_halloweenLightSwitchRequest' 1 && await_count 'DELETE /v1/dv/GUI_halloweenLightSwitchRequest' 2; then
+        echo WELCOME_SERVICE_TIMEOUT_PASS
+    fi
+    stop_service || :
+fi
+for scenario in gear occupancy disabled telemetry; do
+    if start_service; then
+        printf 'false\n' > /tmp/locked
+        if await_count 'PUT /v1/dv/GUI_halloweenLightSwitchRequest' 1; then
+            case "$scenario" in
+                gear) printf 'D\n' > /tmp/gear ;;
+                occupancy) printf 'true\n' > /tmp/present ;;
+                disabled) printf 'false\n' > /tmp/settings/enabled ;;
+                telemetry) printf 'unknown\n' > /tmp/gear ;;
+            esac
+            if await_count 'DELETE /v1/dv/GUI_halloweenLightSwitchRequest' 2; then
+                echo "WELCOME_SERVICE_${scenario}_PASS"
+            fi
+        fi
+        stop_service || :
+    fi
+done
+if start_service; then
+    printf 'false\n' > /tmp/locked
+    if await_count 'PUT /v1/dv/GUI_halloweenLightSwitchRequest' 1 && stop_service && await_count 'DELETE /v1/dv/GUI_halloweenLightSwitchRequest' 2; then
+        echo WELCOME_SERVICE_TERM_PASS
+    fi
+fi
+. /tmp/pkg/lib/runtime.sh
+if api GET /unavailable >/dev/null 2>&1; then fail 'HTTP 503 was accepted'; else echo WELCOME_SERVICE_HTTP_FAILURE_PASS; fi
+if grep -v '|Bearer nonsecret-test-token|' /tmp/requests; then fail 'Authorization header missing'; else echo WELCOME_SERVICE_AUTH_PASS; fi
+if /bin/bash /tmp/pkg/hooks/apply.sh && /bin/bash /tmp/pkg/hooks/apply.sh && /bin/bash /tmp/pkg/hooks/remove.sh; then
+    echo WELCOME_SERVICE_HOOKS_PASS
+else fail 'Apply/remove hooks failed'; fi
+kill "$server"; wait "$server" 2>/dev/null || :
+echo WELCOME_SERVICE_DONE
+sync
+echo o > /proc/sysrq-trigger
+while :; do sleep 1; done

@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "id": "com.appenetic.welcome-light",
+  "version": "0.1.0-alpha.1",
+  "sdk": ">=1.0 <2",
+  "title": "Welcome Light (experimental)",
+  "summary": "Experimental unlock-triggered position-light request. Pre-unlock proximity, DRLs and physical tail-light operation are not validated. Disabled by default.",
+  "authors": [
+    {
+      "name": "Appenetic",
+      "url": "https://github.com/appenetic/cs-extensions"
+    }
+  ],
+  "capabilities": [
+    "service",
+    "vehicle.read",
+    "dv.read",
+    "dv.write:GUI_halloweenLightSwitchRequest"
+  ],
+  "settings": [
+    {
+      "id": "enabled",
+      "type": "bool",
+      "title": "Enable experimental light request",
+      "summary": "Unverified firmware path. Trigger is a locked-to-unlocked transition, not pre-unlock approach.",
+      "default": false
+    },
+    {
+      "id": "duration",
+      "type": "enum",
+      "title": "Welcome duration (seconds)",
+      "values": [
+        {
+          "value": "5",
+          "title": "5"
+        },
+        {
+          "value": "10",
+          "title": "10"
+        },
+        {
+          "value": "15",
+          "title": "15"
+        },
+        {
+          "value": "20",
+          "title": "20"
+        },
+        {
+          "value": "30",
+          "title": "30"
+        }
+      ],
+      "default": "15"
+    }
+  ],
+  "hooks": {
+    "apply": {
+      "run": "hooks/apply.sh",
+      "rerun": "in-place",
+      "phase": "late",
+      "timeout": 10
+    },
+    "remove": {
+      "run": "hooks/remove.sh",
+      "timeout": 10
+    },
+    "service": [
+      {
+        "id": "welcome",
+        "run": "hooks/service.sh",
+        "restart": "on-failure"
+      }
+    ]
+  }
+}

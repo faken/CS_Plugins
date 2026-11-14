@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "repository": {
+    "name": "Appenetic CS Extensions",
+    "homepage": "https://github.com/appenetic/cs-extensions"
+  },
+  "generated_unix": 1794614400,
+  "packages": [
+    {
+      "id": "com.appenetic.welcome-light",
+      "version": "0.1.0-alpha.1",
+      "sdk": ">=1.0 <2",
+      "title": "Welcome Light (experimental)",
+      "published_unix": 1794614400,
+      "withdrawn": false,
+      "manifest": {
+        "schema": 1,
+        "id": "com.appenetic.welcome-light",
+        "version": "0.1.0-alpha.1",
+        "sdk": ">=1.0 <2",
+        "title": "Welcome Light (experimental)",
+        "summary": "Experimental unlock-triggered position-light request. Pre-unlock proximity, DRLs and physical tail-light operation are not validated. Disabled by default.",
+        "authors": [
+          {
+            "name": "Appenetic",
+            "url": "https://github.com/appenetic/cs-extensions"
+          }
+        ],
+        "capabilities": [
+          "service",
+          "vehicle.read",
+          "dv.read",
+          "dv.write:GUI_halloweenLightSwitchRequest"
+        ],
+        "settings": [
+          {
+            "id": "enabled",
+            "type": "bool",
+            "title": "Enable experimental light request",
+            "summary": "Unverified firmware path. Trigger is a locked-to-unlocked transition, not pre-unlock approach.",
+            "default": false
+          },
+          {
+            "id": "duration",
+            "type": "enum",
+            "title": "Welcome duration (seconds)",
+            "values": [
+              {
+                "value": "5",
+                "title": "5"
+              },
+              {
+                "value": "10",
+                "title": "10"
+              },
+              {
+                "value": "15",
+                "title": "15"
+              },
+              {
+                "value": "20",
+                "title": "20"
+              },
+              {
+                "value": "30",
+                "title": "30"
+              }
+            ],
+            "default": "15"
+          }
+        ],
+        "hooks": {
+          "apply": {
+            "run": "hooks/apply.sh",
+            "rerun": "in-place",
+            "phase": "late",
+            "timeout": 10
+          },
+          "remove": {
+            "run": "hooks/remove.sh",
+            "timeout": 10
+          },
+          "service": [
+            {
+              "id": "welcome",
+              "run": "hooks/service.sh",
+              "restart": "on-failure"
+            }
+          ]
+        }
+      },
+      "manifest_sha256": "6075d364c3a62343d11bbfaf3f35c315b9cb3e0b44b857437e13a762908e5725",
+      "archive": {
+        "url": "pool/af7cbd56d9d6b50101cb29cdd3f3ae3d5235e8a176978d6a0429e652ef73d9b8",
+        "sha256": "af7cbd56d9d6b50101cb29cdd3f3ae3d5235e8a176978d6a0429e652ef73d9b8",
+        "bytes": 20480
+      }
+    }
+  ]
+}

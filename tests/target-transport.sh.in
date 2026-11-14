@@ -1,0 +1,42 @@
+#!/bin/bash
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+mkdir -p /tmp /run
+@@RUNTIME@@
+cat > /tmp/respond.sh <<'RESPONSE_END'
+#!/bin/bash
+IFS= read -r request
+printf '%s\n' "$request" > /tmp/request-line
+while IFS= read -r line; do
+    printf '%s\n' "$line" >> /tmp/request-headers
+    [ "$line" = "$(printf '\r')" ] && break
+done
+printf 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK'
+RESPONSE_END
+chmod +x /tmp/respond.sh
+socat UNIX-LISTEN:/tmp/test-api.sock EXEC:/tmp/respond.sh >/tmp/socat.log 2>&1 &
+server=$!
+sleep 1
+export CSDK_API_SOCKET=/tmp/test-api.sock CSDK_TOKEN=nonsecret-test-token
+. /tmp/runtime.sh
+result=$(api GET /vehicle/gear)
+if [ "$result" = OK ] && grep -q 'GET /v1/vehicle/gear HTTP/1.1' /tmp/request-line && grep -q 'Authorization: Bearer nonsecret-test-token' /tmp/request-headers; then
+    echo 'WELCOME_TARGET_TRANSPORT_PASS'
+else
+    echo 'WELCOME_TARGET_TRANSPORT_FAIL'
+    cat /tmp/socat.log /tmp/request-line /tmp/request-headers
+fi
+wait "$server"
+reset_state
+api() { printf '%s %s\n' "$1" "$2" >> /tmp/calls; }
+step 0 true 5 P true false
+step 1 true 5 P false false
+step 6 true 5 P false false
+if [ "$(wc -l < /tmp/calls)" = 2 ] && [ "$active" = 0 ]; then
+    echo 'WELCOME_TARGET_STATE_PASS'
+else
+    echo 'WELCOME_TARGET_STATE_FAIL'
+fi
+echo 'WELCOME_TARGET_DONE'
+sync
+echo o > /proc/sysrq-trigger
+while :; do sleep 1; done
